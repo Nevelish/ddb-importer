@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 350px;
+      padding: 0;
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    .container {
+      padding: 20px;
+    }
+    
+    h2 {
+      margin: 0 0 15px 0;
+      color: white;
+      font-size: 18px;
+      text-align: center;
+    }
+    
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    button {
+      background: white;
+      color: #667eea;
+      border: none;
+      padding: 14px 20px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      background: #f0f0f0;
+    }
+    
+    button:active {
+      transform: translateY(0);
+    }
+    
+    #status {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      text-align: center;
+      min-height: 20px;
+    }
+    
+    #status.success {
+      background: #10b981;
+      color: white;
+    }
+    
+    #status.error {
+      background: #ef4444;
+      color: white;
+    }
+    
+    #status.info {
+      background: rgba(255, 255, 255, 0.9);
+      color: #667eea;
+    }
+    
+    .note {
+      margin-top: 15px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      color: white;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🎲 D&D Beyond → Foundry</h2>
+    
+    <div class="button-group">
+      <button id="copy-cobalt-btn">
+        <span>📋</span>
+        <span>Copy Cobalt Cookie</span>
+      </button>
+      
+      <button id="copy-character-btn">
+        <span>🎲</span>
+        <span>Copy Character Data</span>
+      </button>
+    </div>
+    
+    <div id="status"></div>
+    
+    <div class="note">
+      <strong>Usage:</strong> Navigate to a character page on D&D Beyond, then click "Copy Character Data" to export. Paste into Foundry VTT to import.
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

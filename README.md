@@ -1,93 +1,145 @@
-# D&D Beyond Character Importer
+# DnD Beyond to Foundry VTT
 
-A Foundry VTT module that allows you to import characters from D&D Beyond using exported character data.
+A browser extension that exports D&D Beyond characters to FoundryVTT by extracting character data and session cookies.
 
-## Features
+## 🎲 Features
 
-- **Easy Import**: Paste character data from D&D Beyond directly into Foundry VTT
-- **Automatic Conversion**: Converts D&D Beyond character format to Foundry VTT's DND5e system format
-- **Update or Create**: Automatically updates existing characters or creates new ones
-- **Complete Character Data**: Imports essential character information including:
-  - Ability scores (STR, DEX, CON, INT, WIS, CHA)
-  - Hit points (current, max, and temporary)
-  - Armor class
-  - Movement speed
-  - Character level and proficiency bonus
-  - Race, background, and alignment
-  - Class levels
-- **User-Friendly Interface**: Custom dialog with intuitive import workflow
-- **Visual Integration**: Adds import button to the Actors Directory for easy access
+- **Cookie Extraction**: Copies your D&D Beyond Cobalt session cookie for authentication
+- **Character Data Export**: Fetches and exports complete character data from D&D Beyond
+- **Cross-Browser Support**: Compatible with both Firefox and Chrome/Chromium-based browsers
+- **Simple Interface**: Easy-to-use popup with two main functions
 
-## Compatibility
+## 📋 Installation
 
-- **Minimum Foundry VTT Version**: 11
-- **Verified Version**: 13
-- **Required System**: DND5e (Dungeons & Dragons 5th Edition)
+### Firefox
+1. Clone or download this repository
+2. Open Firefox and navigate to `about:debugging`
+3. Click "This Firefox" → "Load Temporary Add-on"
+4. Select the `manifest.json` file from the extension directory
 
-## Installation
+### Chrome/Edge/Brave
+1. Clone or download this repository
+2. Open your browser and navigate to `chrome://extensions/` (or `edge://extensions/`)
+3. Enable "Developer mode" in the top right
+4. Click "Load unpacked"
+5. Select the extension directory
 
-1. In Foundry VTT, go to the "Add-on Modules" tab
-2. Click "Install Module"
-3. Search for "D&D Beyond Character Importer" or use the manifest URL
-4. Click "Install"
-5. Enable the module in your world's module settings
+## 🚀 Usage
 
-## Usage
+1. Navigate to a D&D Beyond character page (e.g., `https://www.dndbeyond.com/characters/[character-id]`)
+2. Click the extension icon in your browser toolbar
+3. Choose one of two options:
+   - **Copy Cobalt Cookie**: Exports your session cookie along with character URL and ID
+   - **Copy Character Data**: Fetches and exports complete character data from D&D Beyond's API
 
-### Importing a Character
+4. The exported data is automatically copied to your clipboard in JSON format
+5. Paste the data into Foundry VTT to import your character
 
-1. Click the "Import from D&D Beyond" button in the Actors Directory header
-2. Paste the character data from D&D Beyond (see instructions in the dialog)
-3. Click "Import Character"
-4. The character will be created or updated in your actors list
-5. The character sheet will automatically open
-
-### Notes
-
-- If a character with the same name already exists, it will be updated with the new data
-- If no character with that name exists, a new character will be created
-- Make sure you're using the correct data format from D&D Beyond
-
-## File Structure
+## 📦 Project Structure
 
 ```
-ddb-importer/
-├── main.js           # Main module script with import logic
-├── import.html       # HTML template for import dialog
-├── module.css        # Styling for the import interface
-├── module.json       # Module manifest and metadata
-├── LICENSE           # MIT License
-└── README.md         # This file
+Beyond-to-FoundryVVT/
+├── manifest.json       # Extension configuration
+├── background.js       # Background script for cookie/API handling
+├── popup.html         # Extension popup interface
+├── popup.js           # Popup functionality and event handlers
+├── icon16.png         # Extension icon (16x16)
+├── icon48.png         # Extension icon (48x48)
+├── icon128.png        # Extension icon (128x128)
+└── LICENSE            # License file
 ```
 
-## Technical Details
+## 🔧 How It Works
 
-### Module Components
+### Background Script (`background.js`)
+- Handles cookie retrieval from D&D Beyond
+- Fetches character data from D&D Beyond's Character Service API
+- Uses the CobaltSession cookie for authentication
 
-- **DDBImporterDialog**: Form application class that handles the import dialog UI
-- **Character Conversion**: Converts D&D Beyond data format to Foundry VTT actor data
-- **Hooks Integration**: Integrates with Foundry VTT's actor directory system
+### Popup Interface (`popup.html` & `popup.js`)
+- Provides a user-friendly interface with two main buttons
+- Validates that the user is on a D&D Beyond character page
+- Extracts character ID from the URL
+- Displays status messages for user feedback
+- Copies formatted JSON data to clipboard
 
-### Data Mapping
+## 🔑 Exported Data Format
 
-The module maps D&D Beyond character data to Foundry VTT's DND5e system:
+### Cookie Export
+```json
+{
+  "cobaltCookie": "your-session-cookie",
+  "characterUrl": "https://www.dndbeyond.com/characters/123456",
+  "characterId": "123456",
+  "timestamp": "2026-02-05T12:00:00.000Z"
+}
+```
 
-- Ability scores (1-6 IDs) → STR, DEX, CON, INT, WIS, CHA
-- Hit points calculation (base + bonus - removed)
-- Alignment IDs (1-9) → Foundry alignment codes
-- Proficiency bonus calculation based on character level
-- Class levels and multi-classing support
+### Character Data Export
+```json
+{
+  "cobaltCookie": "your-session-cookie",
+  "characterUrl": "https://www.dndbeyond.com/characters/123456",
+  "characterId": "123456",
+  "characterData": { /* Complete character data from D&D Beyond API */ },
+  "timestamp": "2026-02-05T12:00:00.000Z"
+}
+```
 
-## License
+## ⚠️ Requirements
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+- Active D&D Beyond account (must be logged in)
+- Access to the character you want to export
+- Modern browser (Firefox, Chrome, Edge, or Brave)
 
-Copyright (c) 2026 Preben Lysa Heika
+## 🔒 Privacy & Security
 
-## Contributing
+- This extension only accesses D&D Beyond cookies and character data
+- No data is sent to external servers
+- All data processing happens locally in your browser
+- Exported data is only copied to your clipboard
 
-Contributions are welcome! Feel free to submit issues or pull requests.
+## 📝 Permissions
 
-## Support
+The extension requires the following permissions:
+- `cookies`: To retrieve your D&D Beyond session cookie
+- `activeTab`: To detect when you're on a character page
+- `clipboardWrite`: To copy exported data to your clipboard
+- `*://*.dndbeyond.com/*`: To access D&D Beyond pages and API
 
-If you encounter any issues or have questions, please open an issue on the GitHub repository.
+## 🐛 Troubleshooting
+
+**Extension says "Cobalt cookie not found"**
+- Make sure you're logged into D&D Beyond
+- Try refreshing the D&D Beyond page
+- Check that you have an active session
+
+**"Not on a character page" error**
+- Navigate to a specific character page (URL should include `/characters/[number]`)
+- Refresh the page and try again
+
+**Character data fetch fails**
+- Ensure you have access to the character
+- Check your internet connection
+- Try logging out and back into D&D Beyond
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to:
+- Report bugs
+- Suggest new features
+- Submit pull requests
+
+## 📄 License
+
+This project is licensed under the terms included in the LICENSE file.
+
+## ⚡ Acknowledgments
+
+- Built for the Foundry VTT community
+- Uses D&D Beyond's Character Service API
+- Compatible with official Foundry VTT importers
+
+---
+
+**Note**: This is an unofficial tool and is not affiliated with or endorsed by D&D Beyond or Foundry Gaming LLC.
