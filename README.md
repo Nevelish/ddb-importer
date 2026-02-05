@@ -1,1 +1,1 @@
-https://raw.githubusercontent.com/Nevelish/ddb-importer/main/foundry-module/module.json
+"https://github.com/Nevelish/ddb-importer/releases/download/v1.0.1/foundry-module.zip"
