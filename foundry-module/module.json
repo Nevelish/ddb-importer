@@ -2,7 +2,7 @@
   "id": "ddb-importer",
   "title": "D&D Beyond Character Importer",
   "description": "Import characters from D&D Beyond using exported data",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "authors": [
     {
       "name": "Nevelish",
