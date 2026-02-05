@@ -1,0 +1,25 @@
+{
+  "ddb-importer": {
+    "settings": {
+      "lastImport": {
+        "name": "Last Import Data",
+        "hint": "Stores the last imported character data"
+      }
+    },
+    "dialog": {
+      "title": "Import from D&D Beyond",
+      "pasteLabel": "Paste Character Data from D&D Beyond Extension:",
+      "pastePlaceholder": "1. Go to your character page on D&D Beyond\n2. Click 'Copy Character Data' button\n3. Paste the data here\n4. Click Import",
+      "note": "If a character with the same name exists, it will be updated. Otherwise, a new character will be created.",
+      "importButton": "Import Character"
+    },
+    "notifications": {
+      "noData": "Please paste character data from D&D Beyond extension",
+      "invalidFormat": "Invalid data format. Please use 'Copy Character Data' from the extension.",
+      "importing": "Importing character...",
+      "success": "Character \"{name}\" imported successfully!",
+      "updated": "Updated existing character: {name}",
+      "failed": "Import failed: {error}"
+    }
+  }
+}
