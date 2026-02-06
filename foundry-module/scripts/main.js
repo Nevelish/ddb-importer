@@ -1,5 +1,41 @@
 // Main module script for Foundry VTT
 
+class DDBImporter {
+  static async ensureCustomCompendium() {
+    const existingId = game.settings.get("nevelish-ddb-importer", "customCompendiumId");
+    
+    // Check if compendium exists
+    if (existingId && game.packs.get(existingId)) {
+      console.log("DDB Importer | Custom compendium found");
+      return game.packs.get(existingId);
+    }
+    
+    // Create new compendium
+    try {
+      const pack = await CompendiumCollection.createCompendium({
+        name: "ddb-imported-content",
+        label: "D&D Beyond Imports",
+        type: "Item",
+        package: "world"
+      });
+      
+      await game.settings.set("nevelish-ddb-importer", "customCompendiumId", pack.collection);
+      console.log("DDB Importer | Created custom compendium");
+      ui.notifications.info("Created D&D Beyond Imports compendium");
+      
+      return pack;
+    } catch (error) {
+      console.error("DDB Importer | Failed to create compendium:", error);
+      return null;
+    }
+  }
+  
+  static async getCustomCompendium() {
+    const compendiumId = game.settings.get("nevelish-ddb-importer", "customCompendiumId");
+    return game.packs.get(compendiumId);
+  }
+}
+
 class DDBImporterDialog extends FormApplication {
   constructor(actor = null) {
     super();
@@ -86,8 +122,6 @@ class DDBImporterDialog extends FormApplication {
       );
     }
 
-    const actorData = this._convertDDBToFoundry(ddbData);
-
     // Store D&D Beyond URL and character ID in actor flags
     const ddbFlags = {
       "nevelish-ddb-importer.characterUrl": ddbData.characterUrl,
@@ -98,28 +132,100 @@ class DDBImporterDialog extends FormApplication {
     if (actor) {
       // Update existing - CLEAR existing items to prevent double bonuses
       await actor.deleteEmbeddedDocuments("Item", actor.items.map(i => i.id));
-      await actor.update({
-        ...actorData,
-        flags: { ...actor.flags, ...ddbFlags }
-      });
-      ui.notifications.info(`Updated character: ${actor.name}`);
     } else {
-      // Create new
+      // Create new actor
       actor = await Actor.create({
         name: characterName,
         type: "character",
-        ...actorData,
         flags: ddbFlags
       });
-      ui.notifications.info(`Created new character: ${characterName}`);
     }
 
+    // Import classes and race first (these affect level calculation)
+    await this._importClasses(actor, ddbData.data);
+    await this._importRace(actor, ddbData.data);
+    
+    // Now update actor data with calculated values
+    const actorData = this._convertDDBToFoundry(ddbData);
+    await actor.update({
+      ...actorData,
+      flags: { ...actor.flags, ...ddbFlags }
+    });
+    
     // Import items, spells, and features
     await this._importItems(actor, ddbData.data);
     await this._importSpells(actor, ddbData.data);
     await this._importFeatures(actor, ddbData.data);
 
+    ui.notifications.info(`${actor.isOwner ? 'Updated' : 'Created'} character: ${actor.name}`);
     return actor;
+  }
+
+  async _importClasses(actor, ddbData) {
+    const classes = ddbData.classes || [];
+    const classItems = [];
+
+    for (const cls of classes) {
+      if (!cls.definition) continue;
+
+      // Try to find class in compendium
+      const compendiumClass = await this._findInCompendium(cls.definition.name, "class");
+      
+      if (compendiumClass) {
+        const classData = compendiumClass.toObject();
+        classData.system.levels = cls.level || 1;
+        
+        // Add subclass if exists
+        if (cls.subclassDefinition) {
+          classData.system.subclass = cls.subclassDefinition.name || "";
+        }
+        
+        classItems.push(classData);
+      } else {
+        // Fallback manual creation
+        classItems.push({
+          name: cls.definition.name,
+          type: "class",
+          img: cls.definition.portraitAvatarUrl || "icons/svg/book.svg",
+          system: {
+            description: {
+              value: cls.definition.description || ""
+            },
+            levels: cls.level || 1,
+            hitDice: `d${cls.definition.hitDice || 8}`,
+            hitDiceUsed: 0,
+            subclass: cls.subclassDefinition?.name || ""
+          }
+        });
+      }
+    }
+
+    if (classItems.length > 0) {
+      await actor.createEmbeddedDocuments("Item", classItems);
+      ui.notifications.info(`Imported ${classItems.length} class(es)`);
+    }
+  }
+
+  async _importRace(actor, ddbData) {
+    const race = ddbData.race;
+    if (!race || !race.fullName) return;
+
+    // Try to find race in compendium
+    const compendiumRace = await this._findInCompendium(race.baseRaceName || race.fullName, "race");
+    
+    const raceData = compendiumRace ? compendiumRace.toObject() : {
+      name: race.fullName,
+      type: "race",
+      img: race.portraitAvatarUrl || "icons/svg/mystery-man.svg",
+      system: {
+        description: {
+          value: race.description || ""
+        }
+      }
+    };
+
+    await actor.createEmbeddedDocuments("Item", [raceData]);
+    ui.notifications.info(`Imported race: ${race.fullName}`);
   }
 
   _convertDDBToFoundry(ddbData) {
@@ -197,9 +303,14 @@ class DDBImporterDialog extends FormApplication {
           ac: {
             value: data.armorClass || 10
           },
-          speed: {
-            value: data.speed?.walk || 30,
-            special: this._getSpecialSpeeds(data.speed)
+          movement: {
+            walk: data.speed?.walk || race.weightSpeeds?.normal?.walk || 30,
+            fly: data.speed?.fly || 0,
+            swim: data.speed?.swim || 0,
+            climb: data.speed?.climb || 0,
+            burrow: data.speed?.burrow || 0,
+            units: "ft",
+            hover: false
           },
           prof: this._calculateProfBonus(totalLevel),
           spellcasting: this._getPrimaryCastingStat(classes)
@@ -232,6 +343,16 @@ class DDBImporterDialog extends FormApplication {
         bonuses: {}
       }
     };
+  }
+
+  _getSpecialSpeeds(speed) {
+    if (!speed) return "";
+    const speeds = [];
+    if (speed.fly) speeds.push(`fly ${speed.fly} ft.`);
+    if (speed.swim) speeds.push(`swim ${speed.swim} ft.`);
+    if (speed.climb) speeds.push(`climb ${speed.climb} ft.`);
+    if (speed.burrow) speeds.push(`burrow ${speed.burrow} ft.`);
+    return speeds.join(", ");
   }
 
   _getSpecialSpeeds(speed) {
@@ -329,45 +450,61 @@ class DDBImporterDialog extends FormApplication {
     for (const item of inventory) {
       if (!item.definition) continue;
 
-      const itemData = {
-        name: item.definition.name,
-        type: this._getItemType(item.definition),
-        img: item.definition.avatarUrl || "icons/svg/item-bag.svg",
-        system: {
-          description: {
-            value: item.definition.description || ""
-          },
-          quantity: item.quantity || 1,
-          weight: item.definition.weight || 0,
-          price: {
-            value: item.definition.cost || 0,
-            denomination: "gp"
-          },
-          equipped: item.equipped || false,
-          identified: true,
-          rarity: this._getRarity(item.definition.rarity),
-          attunement: item.definition.requiresAttunement ? 1 : 0
+      // Try to find item in compendium first
+      const compendiumItem = await this._findInCompendium(item.definition.name, "item");
+      
+      if (compendiumItem) {
+        // Use compendium item but update quantity and equipped status
+        const itemData = compendiumItem.toObject();
+        itemData.system.quantity = item.quantity || 1;
+        itemData.system.equipped = item.equipped || false;
+        if (item.isAttuned) itemData.system.attunement = 2; // Attuned
+        items.push(itemData);
+      } else {
+        // Create from D&D Beyond data
+        const itemData = {
+          name: item.definition.name,
+          type: this._getItemType(item.definition),
+          img: item.definition.avatarUrl || "icons/svg/item-bag.svg",
+          system: {
+            description: {
+              value: item.definition.description || ""
+            },
+            quantity: item.quantity || 1,
+            weight: item.definition.weight || 0,
+            price: {
+              value: item.definition.cost || 0,
+              denomination: "gp"
+            },
+            equipped: item.equipped || false,
+            identified: true,
+            rarity: this._getRarity(item.definition.rarity),
+            attunement: item.definition.requiresAttunement ? 1 : 0
+          }
+        };
+
+        // Add weapon/armor specific properties
+        if (item.definition.damage) {
+          itemData.system.damage = {
+            parts: [[item.definition.damage.diceString, item.definition.damageType || ""]],
+            versatile: ""
+          };
+          itemData.system.actionType = "mwak";
+          itemData.system.properties = this._getWeaponProperties(item.definition);
         }
-      };
 
-      // Add weapon/armor specific properties
-      if (item.definition.damage) {
-        itemData.system.damage = {
-          parts: [[item.definition.damage.diceString, item.definition.damageType || ""]],
-          versatile: ""
-        };
-        itemData.system.actionType = "mwak";
-        itemData.system.properties = this._getWeaponProperties(item.definition);
+        if (item.definition.armorClass !== undefined) {
+          itemData.system.armor = {
+            value: item.definition.armorClass,
+            type: this._getArmorType(item.definition.type)
+          };
+        }
+
+        // Save to custom compendium for future use
+        await this._saveToCustomCompendium(itemData);
+        
+        items.push(itemData);
       }
-
-      if (item.definition.armorClass !== undefined) {
-        itemData.system.armor = {
-          value: item.definition.armorClass,
-          type: this._getArmorType(item.definition.type)
-        };
-      }
-
-      items.push(itemData);
     }
 
     if (items.length > 0) {
@@ -384,49 +521,66 @@ class DDBImporterDialog extends FormApplication {
       for (const spell of spellList.spells || []) {
         if (!spell.definition) continue;
 
-        const spellData = {
-          name: spell.definition.name,
-          type: "spell",
-          img: "icons/svg/book.svg",
-          system: {
-            description: {
-              value: spell.definition.description || ""
-            },
-            level: spell.definition.level || 0,
-            school: this._getSpellSchool(spell.definition.school),
-            components: {
-              vocal: spell.definition.components?.includes(1) || false,
-              somatic: spell.definition.components?.includes(2) || false,
-              material: spell.definition.components?.includes(3) || false,
-              ritual: spell.definition.ritual || false,
-              concentration: spell.definition.concentration || false
-            },
-            materials: {
-              value: spell.definition.componentsDescription || ""
-            },
-            preparation: {
-              mode: spell.alwaysPrepared ? "always" : "prepared",
-              prepared: spell.prepared || false
-            },
-            actionType: this._getSpellActionType(spell.definition),
-            damage: this._getSpellDamage(spell.definition),
-            save: this._getSpellSave(spell.definition),
-            duration: {
-              value: spell.definition.duration?.durationInterval || null,
-              units: this._getDurationUnit(spell.definition.duration?.durationUnit)
-            },
-            range: {
-              value: spell.definition.range?.rangeValue || null,
-              units: this._getRangeUnit(spell.definition.range?.origin)
-            },
-            target: {
-              value: spell.definition.range?.aoeValue || null,
-              type: this._getAreaOfEffect(spell.definition.range?.aoeType)
+        // Try to find spell in compendium first
+        const compendiumSpell = await this._findInCompendium(spell.definition.name, "spell");
+        
+        if (compendiumSpell) {
+          // Use compendium spell but update preparation status
+          const spellData = compendiumSpell.toObject();
+          spellData.system.preparation = {
+            mode: spell.alwaysPrepared ? "always" : "prepared",
+            prepared: spell.prepared || false
+          };
+          spells.push(spellData);
+        } else {
+          // Create from D&D Beyond data
+          const spellData = {
+            name: spell.definition.name,
+            type: "spell",
+            img: "icons/svg/book.svg",
+            system: {
+              description: {
+                value: spell.definition.description || ""
+              },
+              level: spell.definition.level || 0,
+              school: this._getSpellSchool(spell.definition.school),
+              components: {
+                vocal: spell.definition.components?.includes(1) || false,
+                somatic: spell.definition.components?.includes(2) || false,
+                material: spell.definition.components?.includes(3) || false,
+                ritual: spell.definition.ritual || false,
+                concentration: spell.definition.concentration || false
+              },
+              materials: {
+                value: spell.definition.componentsDescription || ""
+              },
+              preparation: {
+                mode: spell.alwaysPrepared ? "always" : "prepared",
+                prepared: spell.prepared || false
+              },
+              actionType: this._getSpellActionType(spell.definition),
+              damage: this._getSpellDamage(spell.definition),
+              save: this._getSpellSave(spell.definition),
+              duration: {
+                value: spell.definition.duration?.durationInterval || null,
+                units: this._getDurationUnit(spell.definition.duration?.durationUnit)
+              },
+              range: {
+                value: spell.definition.range?.rangeValue || null,
+                units: this._getRangeUnit(spell.definition.range?.origin)
+              },
+              target: {
+                value: spell.definition.range?.aoeValue || null,
+                type: this._getAreaOfEffect(spell.definition.range?.aoeType)
+              }
             }
-          }
-        };
+          };
 
-        spells.push(spellData);
+          // Save to custom compendium for future use
+          await this._saveToCustomCompendium(spellData);
+          
+          spells.push(spellData);
+        }
       }
     }
 
@@ -445,25 +599,36 @@ class DDBImporterDialog extends FormApplication {
       for (const feature of cls.classFeatures || []) {
         if (!feature.definition) continue;
 
-        features.push({
-          name: feature.definition.name,
-          type: "feat",
-          img: "icons/svg/aura.svg",
-          system: {
-            description: {
-              value: feature.definition.description || ""
-            },
-            activation: {
-              type: this._getActivationType(feature.definition.activation),
-              cost: feature.definition.activation?.activationTime || null
-            },
-            uses: this._getFeatureUses(feature.definition.limitedUse),
-            requirements: cls.definition?.name || "",
-            type: {
-              value: "class"
+        // Try to find feature in compendium
+        const compendiumFeature = await this._findInCompendium(feature.definition.name, "feat");
+        
+        if (compendiumFeature) {
+          features.push(compendiumFeature.toObject());
+        } else {
+          const featureData = {
+            name: feature.definition.name,
+            type: "feat",
+            img: "icons/svg/aura.svg",
+            system: {
+              description: {
+                value: feature.definition.description || ""
+              },
+              activation: {
+                type: this._getActivationType(feature.definition.activation),
+                cost: feature.definition.activation?.activationTime || null
+              },
+              uses: this._getFeatureUses(feature.definition.limitedUse),
+              requirements: cls.definition?.name || "",
+              type: {
+                value: "class"
+              }
             }
-          }
-        });
+          };
+          
+          // Save to custom compendium
+          await this._saveToCustomCompendium(featureData);
+          features.push(featureData);
+        }
       }
     }
 
@@ -472,20 +637,30 @@ class DDBImporterDialog extends FormApplication {
     for (const trait of race.racialTraits || []) {
       if (!trait.definition) continue;
 
-      features.push({
-        name: trait.definition.name,
-        type: "feat",
-        img: "icons/svg/pawprint.svg",
-        system: {
-          description: {
-            value: trait.definition.description || ""
-          },
-          requirements: race.fullName || "",
-          type: {
-            value: "race"
+      const compendiumTrait = await this._findInCompendium(trait.definition.name, "feat");
+      
+      if (compendiumTrait) {
+        features.push(compendiumTrait.toObject());
+      } else {
+        const traitData = {
+          name: trait.definition.name,
+          type: "feat",
+          img: "icons/svg/pawprint.svg",
+          system: {
+            description: {
+              value: trait.definition.description || ""
+            },
+            requirements: race.fullName || "",
+            type: {
+              value: "race"
+            }
           }
-        }
-      });
+        };
+        
+        // Save to custom compendium
+        await this._saveToCustomCompendium(traitData);
+        features.push(traitData);
+      }
     }
 
     // Feats
@@ -493,24 +668,119 @@ class DDBImporterDialog extends FormApplication {
     for (const feat of feats) {
       if (!feat.definition) continue;
 
-      features.push({
-        name: feat.definition.name,
-        type: "feat",
-        img: "icons/svg/upgrade.svg",
-        system: {
-          description: {
-            value: feat.definition.description || ""
-          },
-          type: {
-            value: "feat"
+      const compendiumFeat = await this._findInCompendium(feat.definition.name, "feat");
+      
+      if (compendiumFeat) {
+        features.push(compendiumFeat.toObject());
+      } else {
+        const featData = {
+          name: feat.definition.name,
+          type: "feat",
+          img: "icons/svg/upgrade.svg",
+          system: {
+            description: {
+              value: feat.definition.description || ""
+            },
+            type: {
+              value: "feat"
+            }
           }
-        }
-      });
+        };
+        
+        // Save to custom compendium
+        await this._saveToCustomCompendium(featData);
+        features.push(featData);
+      }
     }
 
     if (features.length > 0) {
       await actor.createEmbeddedDocuments("Item", features);
       ui.notifications.info(`Imported ${features.length} features and traits`);
+    }
+  }
+
+  async _findInCompendium(itemName, itemType) {
+    // Search custom compendium first
+    const customPack = await DDBImporter.getCustomCompendium();
+    if (customPack) {
+      const customIndex = await customPack.getIndex();
+      const customEntry = customIndex.find(i => 
+        i.name.toLowerCase() === itemName.toLowerCase() &&
+        (itemType === "feat" || i.type === this._getFoundryItemType(itemType))
+      );
+      
+      if (customEntry) {
+        console.log(`Found ${itemName} in custom compendium`);
+        return await customPack.getDocument(customEntry._id);
+      }
+    }
+    
+    // Search through standard compendiums
+    const compendiumMap = {
+      "spell": ["dnd5e.spells"],
+      "item": ["dnd5e.items", "dnd5e.tradegoods"],
+      "feat": ["dnd5e.classfeatures", "dnd5e.races", "dnd5e.feats"],
+      "class": ["dnd5e.classes"],
+      "race": ["dnd5e.races"]
+    };
+
+    const packs = compendiumMap[itemType] || [];
+    
+    for (const packName of packs) {
+      const pack = game.packs.get(packName);
+      if (!pack) continue;
+
+      const index = await pack.getIndex();
+      const entry = index.find(i => 
+        i.name.toLowerCase() === itemName.toLowerCase()
+      );
+
+      if (entry) {
+        console.log(`Found ${itemName} in ${packName}`);
+        return await pack.getDocument(entry._id);
+      }
+    }
+
+    return null;
+  }
+  
+  _getFoundryItemType(ddbType) {
+    const typeMap = {
+      "spell": "spell",
+      "item": "equipment",
+      "feat": "feat",
+      "class": "class",
+      "race": "race"
+    };
+    return typeMap[ddbType] || ddbType;
+  }
+  
+  async _saveToCustomCompendium(itemData) {
+    const customPack = await DDBImporter.getCustomCompendium();
+    if (!customPack) {
+      console.warn("Custom compendium not available");
+      return null;
+    }
+    
+    try {
+      // Check if item already exists
+      const index = await customPack.getIndex();
+      const existing = index.find(i => i.name.toLowerCase() === itemData.name.toLowerCase());
+      
+      if (existing) {
+        console.log(`${itemData.name} already in custom compendium`);
+        return await customPack.getDocument(existing._id);
+      }
+      
+      // Create new item in compendium
+      const items = await Item.create(itemData, { temporary: true });
+      const imported = await customPack.importDocument(items);
+      console.log(`Saved ${itemData.name} to custom compendium`);
+      
+      return imported;
+    } catch (error) {
+      console.error("Failed to save to custom compendium:", error);
+      return null;
     }
   }
 
@@ -683,6 +953,18 @@ Hooks.once("init", () => {
     type: "String",
     default: ""
   });
+  
+  game.settings.register("nevelish-ddb-importer", "customCompendiumId", {
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
+  });
+});
+
+Hooks.once("ready", async () => {
+  // Ensure custom compendium exists
+  await DDBImporter.ensureCustomCompendium();
 });
 
 // Add sync button to character sheets (Tidy5e specific)
