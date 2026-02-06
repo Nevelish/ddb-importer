@@ -62,7 +62,7 @@ ddb-importer/
 The module manifest file that defines:
 - Module ID: `ddb-importer`
 - Title: "D&D Beyond Character Importer"
-- Version: 1.0.3
+- Version: 1.0.4
 - Compatibility: Foundry VTT v11-v13
 - Dependencies: Requires the D&D 5e system
 - Author: NevelishTV
