@@ -2,7 +2,7 @@
   "id": "nevelish-ddb-importer",
   "title": "D&D Beyond Character Importer",
   "description": "Import characters from D&D Beyond using exported data",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "authors": [
     {
       "name": "Nevelish",
@@ -35,7 +35,7 @@
     ]
   },
   "manifest": "https://raw.githubusercontent.com/Nevelish/nevelish-ddb-importer/main/foundry-module/module.json",
-  "download": "https://github.com/Nevelish/nevelish-ddb-importer/releases/download/v1.0.4/foundry-module.zip",
+  "download": "https://github.com/Nevelish/nevelish-ddb-importer/releases/download/v1.0.5/foundry-module.zip",
   "url": "https://github.com/Nevelish/nevelish-ddb-importer",
   "bugs": "https://github.com/Nevelish/nevelish-ddb-importer/issues"
 }
