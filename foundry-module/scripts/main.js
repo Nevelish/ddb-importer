@@ -950,7 +950,7 @@ Hooks.once("init", () => {
   game.settings.register("nevelish-ddb-importer", "lastImport", {
     scope: "client",
     config: false,
-    type: "String",
+    type: String,
     default: ""
   });
   
@@ -960,6 +960,8 @@ Hooks.once("init", () => {
     type: String,
     default: ""
   });
+  
+  console.log("Settings registered successfully");
 });
 
 Hooks.once("ready", async () => {
