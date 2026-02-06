@@ -96,7 +96,8 @@ class DDBImporterDialog extends FormApplication {
     };
 
     if (actor) {
-      // Update existing
+      // Update existing - CLEAR existing items to prevent double bonuses
+      await actor.deleteEmbeddedDocuments("Item", actor.items.map(i => i.id));
       await actor.update({
         ...actorData,
         flags: { ...actor.flags, ...ddbFlags }
@@ -112,6 +113,11 @@ class DDBImporterDialog extends FormApplication {
       });
       ui.notifications.info(`Created new character: ${characterName}`);
     }
+
+    // Import items, spells, and features
+    await this._importItems(actor, ddbData.data);
+    await this._importSpells(actor, ddbData.data);
+    await this._importFeatures(actor, ddbData.data);
 
     return actor;
   }
@@ -145,12 +151,38 @@ class DDBImporterDialog extends FormApplication {
 
     // Extract classes
     const classes = data.classes || [];
-    const classData = {};
-    classes.forEach(cls => {
-      classData[cls.definition?.name?.toLowerCase() || 'class'] = {
-        level: cls.level || 1
-      };
+    const totalLevel = classes.reduce((sum, c) => sum + (c.level || 0), 0);
+
+    // Extract race info
+    const race = data.race || {};
+    const raceTraits = [];
+    if (race.racialTraits) {
+      race.racialTraits.forEach(trait => {
+        raceTraits.push(trait.definition?.name || trait.name);
+      });
+    }
+
+    // Extract proficiencies
+    const proficiencies = data.modifiers?.race || [];
+    const languages = [];
+    const proficiencyList = [];
+    
+    proficiencies.forEach(mod => {
+      if (mod.subType === 'language') {
+        languages.push(mod.friendlySubtypeName);
+      } else if (mod.type === 'proficiency') {
+        proficiencyList.push(mod.friendlySubtypeName);
+      }
     });
+
+    // Extract skills
+    const skills = {};
+    const skillIds = {
+      3: 'acr', 4: 'ani', 12: 'arc', 2: 'ath', 16: 'dec',
+      6: 'his', 13: 'ins', 17: 'itm', 5: 'inv', 14: 'med',
+      8: 'nat', 9: 'prc', 18: 'prf', 15: 'per', 7: 'rel',
+      11: 'slt', 10: 'ste', 1: 'sur'
+    };
 
     // Build Foundry actor data
     return {
@@ -166,20 +198,464 @@ class DDBImporterDialog extends FormApplication {
             value: data.armorClass || 10
           },
           speed: {
-            value: data.speed?.walk || 30
+            value: data.speed?.walk || 30,
+            special: this._getSpecialSpeeds(data.speed)
           },
-          prof: this._calculateProfBonus(classes[0]?.level || 1)
+          prof: this._calculateProfBonus(totalLevel),
+          spellcasting: this._getPrimaryCastingStat(classes)
         },
         details: {
-          race: data.race?.fullName || "",
+          race: race.fullName || race.baseRaceName || "",
           background: data.background?.definition?.name || "",
           alignment: data.alignmentId ? this._getAlignment(data.alignmentId) : "",
-          level: classes.reduce((sum, c) => sum + (c.level || 0), 0)
+          level: totalLevel,
+          xp: {
+            value: data.currentXp || 0
+          }
         },
         traits: {
-          size: data.race?.size || "med"
-        }
+          size: race.size || race.sizeId ? this._getSize(race.sizeId) : "med",
+          di: { value: this._extractResistances(data, 'immunity') },
+          dr: { value: this._extractResistances(data, 'resistance') },
+          dv: { value: this._extractResistances(data, 'vulnerability') },
+          ci: { value: [] },
+          languages: { value: languages }
+        },
+        currency: {
+          cp: data.currencies?.cp || 0,
+          sp: data.currencies?.sp || 0,
+          ep: data.currencies?.ep || 0,
+          gp: data.currencies?.gp || 0,
+          pp: data.currencies?.pp || 0
+        },
+        spells: this._getSpellSlots(classes, totalLevel),
+        bonuses: {}
       }
+    };
+  }
+
+  _getSpecialSpeeds(speed) {
+    if (!speed) return "";
+    const speeds = [];
+    if (speed.fly) speeds.push(`fly ${speed.fly} ft.`);
+    if (speed.swim) speeds.push(`swim ${speed.swim} ft.`);
+    if (speed.climb) speeds.push(`climb ${speed.climb} ft.`);
+    if (speed.burrow) speeds.push(`burrow ${speed.burrow} ft.`);
+    return speeds.join(", ");
+  }
+
+  _getPrimaryCastingStat(classes) {
+    const casterClass = classes.find(c => c.definition?.spellCastingAbilityId);
+    if (!casterClass) return "int";
+    
+    const abilityMap = { 1: 'str', 2: 'dex', 3: 'con', 4: 'int', 5: 'wis', 6: 'cha' };
+    return abilityMap[casterClass.definition.spellCastingAbilityId] || "int";
+  }
+
+  _getSize(sizeId) {
+    const sizes = { 2: "tiny", 3: "sm", 4: "med", 5: "lg", 6: "huge", 7: "grg" };
+    return sizes[sizeId] || "med";
+  }
+
+  _extractResistances(data, type) {
+    const resistances = [];
+    const modifiers = data.modifiers?.race || [];
+    
+    modifiers.forEach(mod => {
+      if (mod.type === type && mod.friendlySubtypeName) {
+        resistances.push(mod.friendlySubtypeName.toLowerCase());
+      }
+    });
+    
+    return resistances;
+  }
+
+  _getSpellSlots(classes, level) {
+    // Simplified spell slot calculation - would need more logic for multiclassing
+    const casterClass = classes.find(c => c.definition?.canCastSpells);
+    if (!casterClass) return {};
+
+    const spellSlots = {
+      spell1: { value: 0, max: 0 },
+      spell2: { value: 0, max: 0 },
+      spell3: { value: 0, max: 0 },
+      spell4: { value: 0, max: 0 },
+      spell5: { value: 0, max: 0 },
+      spell6: { value: 0, max: 0 },
+      spell7: { value: 0, max: 0 },
+      spell8: { value: 0, max: 0 },
+      spell9: { value: 0, max: 0 }
+    };
+
+    // Basic spell slot progression (full caster)
+    const slots = this._getFullCasterSlots(casterClass.level);
+    Object.keys(slots).forEach(level => {
+      spellSlots[`spell${level}`] = { value: slots[level], max: slots[level] };
+    });
+
+    return spellSlots;
+  }
+
+  _getFullCasterSlots(level) {
+    const progression = {
+      1: { 1: 2 },
+      2: { 1: 3 },
+      3: { 1: 4, 2: 2 },
+      4: { 1: 4, 2: 3 },
+      5: { 1: 4, 2: 3, 3: 2 },
+      6: { 1: 4, 2: 3, 3: 3 },
+      7: { 1: 4, 2: 3, 3: 3, 4: 1 },
+      8: { 1: 4, 2: 3, 3: 3, 4: 2 },
+      9: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 },
+      10: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2 },
+      11: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 },
+      12: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 },
+      13: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1 },
+      14: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1 },
+      15: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1 },
+      16: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1 },
+      17: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1, 9: 1 },
+      18: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 1, 7: 1, 8: 1, 9: 1 },
+      19: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 1, 8: 1, 9: 1 },
+      20: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1 }
+    };
+    return progression[level] || {};
+  }
+
+  async _importItems(actor, ddbData) {
+    const items = [];
+    const inventory = ddbData.inventory || [];
+
+    for (const item of inventory) {
+      if (!item.definition) continue;
+
+      const itemData = {
+        name: item.definition.name,
+        type: this._getItemType(item.definition),
+        img: item.definition.avatarUrl || "icons/svg/item-bag.svg",
+        system: {
+          description: {
+            value: item.definition.description || ""
+          },
+          quantity: item.quantity || 1,
+          weight: item.definition.weight || 0,
+          price: {
+            value: item.definition.cost || 0,
+            denomination: "gp"
+          },
+          equipped: item.equipped || false,
+          identified: true,
+          rarity: this._getRarity(item.definition.rarity),
+          attunement: item.definition.requiresAttunement ? 1 : 0
+        }
+      };
+
+      // Add weapon/armor specific properties
+      if (item.definition.damage) {
+        itemData.system.damage = {
+          parts: [[item.definition.damage.diceString, item.definition.damageType || ""]],
+          versatile: ""
+        };
+        itemData.system.actionType = "mwak";
+        itemData.system.properties = this._getWeaponProperties(item.definition);
+      }
+
+      if (item.definition.armorClass !== undefined) {
+        itemData.system.armor = {
+          value: item.definition.armorClass,
+          type: this._getArmorType(item.definition.type)
+        };
+      }
+
+      items.push(itemData);
+    }
+
+    if (items.length > 0) {
+      await actor.createEmbeddedDocuments("Item", items);
+      ui.notifications.info(`Imported ${items.length} items`);
+    }
+  }
+
+  async _importSpells(actor, ddbData) {
+    const spells = [];
+    const classSpells = ddbData.classSpells || [];
+
+    for (const spellList of classSpells) {
+      for (const spell of spellList.spells || []) {
+        if (!spell.definition) continue;
+
+        const spellData = {
+          name: spell.definition.name,
+          type: "spell",
+          img: "icons/svg/book.svg",
+          system: {
+            description: {
+              value: spell.definition.description || ""
+            },
+            level: spell.definition.level || 0,
+            school: this._getSpellSchool(spell.definition.school),
+            components: {
+              vocal: spell.definition.components?.includes(1) || false,
+              somatic: spell.definition.components?.includes(2) || false,
+              material: spell.definition.components?.includes(3) || false,
+              ritual: spell.definition.ritual || false,
+              concentration: spell.definition.concentration || false
+            },
+            materials: {
+              value: spell.definition.componentsDescription || ""
+            },
+            preparation: {
+              mode: spell.alwaysPrepared ? "always" : "prepared",
+              prepared: spell.prepared || false
+            },
+            actionType: this._getSpellActionType(spell.definition),
+            damage: this._getSpellDamage(spell.definition),
+            save: this._getSpellSave(spell.definition),
+            duration: {
+              value: spell.definition.duration?.durationInterval || null,
+              units: this._getDurationUnit(spell.definition.duration?.durationUnit)
+            },
+            range: {
+              value: spell.definition.range?.rangeValue || null,
+              units: this._getRangeUnit(spell.definition.range?.origin)
+            },
+            target: {
+              value: spell.definition.range?.aoeValue || null,
+              type: this._getAreaOfEffect(spell.definition.range?.aoeType)
+            }
+          }
+        };
+
+        spells.push(spellData);
+      }
+    }
+
+    if (spells.length > 0) {
+      await actor.createEmbeddedDocuments("Item", spells);
+      ui.notifications.info(`Imported ${spells.length} spells`);
+    }
+  }
+
+  async _importFeatures(actor, ddbData) {
+    const features = [];
+    
+    // Class features
+    const classes = ddbData.classes || [];
+    for (const cls of classes) {
+      for (const feature of cls.classFeatures || []) {
+        if (!feature.definition) continue;
+
+        features.push({
+          name: feature.definition.name,
+          type: "feat",
+          img: "icons/svg/aura.svg",
+          system: {
+            description: {
+              value: feature.definition.description || ""
+            },
+            activation: {
+              type: this._getActivationType(feature.definition.activation),
+              cost: feature.definition.activation?.activationTime || null
+            },
+            uses: this._getFeatureUses(feature.definition.limitedUse),
+            requirements: cls.definition?.name || "",
+            type: {
+              value: "class"
+            }
+          }
+        });
+      }
+    }
+
+    // Race features
+    const race = ddbData.race || {};
+    for (const trait of race.racialTraits || []) {
+      if (!trait.definition) continue;
+
+      features.push({
+        name: trait.definition.name,
+        type: "feat",
+        img: "icons/svg/pawprint.svg",
+        system: {
+          description: {
+            value: trait.definition.description || ""
+          },
+          requirements: race.fullName || "",
+          type: {
+            value: "race"
+          }
+        }
+      });
+    }
+
+    // Feats
+    const feats = ddbData.feats || [];
+    for (const feat of feats) {
+      if (!feat.definition) continue;
+
+      features.push({
+        name: feat.definition.name,
+        type: "feat",
+        img: "icons/svg/upgrade.svg",
+        system: {
+          description: {
+            value: feat.definition.description || ""
+          },
+          type: {
+            value: "feat"
+          }
+        }
+      });
+    }
+
+    if (features.length > 0) {
+      await actor.createEmbeddedDocuments("Item", features);
+      ui.notifications.info(`Imported ${features.length} features and traits`);
+    }
+  }
+
+  _getItemType(definition) {
+    const filterType = definition.filterType?.toLowerCase() || "";
+    if (filterType.includes("weapon")) return "weapon";
+    if (filterType.includes("armor")) return "equipment";
+    if (filterType.includes("potion")) return "consumable";
+    if (filterType.includes("scroll")) return "consumable";
+    if (filterType.includes("wondrous")) return "loot";
+    return "loot";
+  }
+
+  _getRarity(rarity) {
+    const rarities = {
+      1: "common",
+      2: "uncommon", 
+      3: "rare",
+      4: "veryRare",
+      5: "legendary",
+      6: "artifact"
+    };
+    return rarities[rarity] || "common";
+  }
+
+  _getWeaponProperties(definition) {
+    const props = {};
+    const properties = definition.properties || [];
+    
+    properties.forEach(prop => {
+      const name = prop.name?.toLowerCase();
+      if (name === "finesse") props.fin = true;
+      if (name === "versatile") props.ver = true;
+      if (name === "light") props.lgt = true;
+      if (name === "heavy") props.hvy = true;
+      if (name === "reach") props.rch = true;
+      if (name === "thrown") props.thr = true;
+      if (name === "two-handed") props.two = true;
+      if (name === "ammunition") props.amm = true;
+      if (name === "loading") props.lod = true;
+    });
+    
+    return props;
+  }
+
+  _getArmorType(type) {
+    const types = {
+      "Light Armor": "light",
+      "Medium Armor": "medium",
+      "Heavy Armor": "heavy",
+      "Shield": "shield"
+    };
+    return types[type] || "light";
+  }
+
+  _getSpellSchool(school) {
+    const schools = {
+      "Abjuration": "abj",
+      "Conjuration": "con",
+      "Divination": "div",
+      "Enchantment": "enc",
+      "Evocation": "evo",
+      "Illusion": "ill",
+      "Necromancy": "nec",
+      "Transmutation": "trs"
+    };
+    return schools[school] || "evo";
+  }
+
+  _getSpellActionType(definition) {
+    if (definition.attackType === 1) return "msak"; // Melee spell attack
+    if (definition.attackType === 2) return "rsak"; // Ranged spell attack
+    if (definition.saveDcAbilityId) return "save";
+    return "util";
+  }
+
+  _getSpellDamage(definition) {
+    if (!definition.damage) return { parts: [] };
+    return {
+      parts: [[definition.damage.diceString || "", definition.damageType || ""]]
+    };
+  }
+
+  _getSpellSave(definition) {
+    if (!definition.saveDcAbilityId) return { ability: "", dc: null };
+    const abilityMap = { 1: 'str', 2: 'dex', 3: 'con', 4: 'int', 5: 'wis', 6: 'cha' };
+    return {
+      ability: abilityMap[definition.saveDcAbilityId] || "dex",
+      dc: null,
+      scaling: "spell"
+    };
+  }
+
+  _getDurationUnit(unit) {
+    const units = {
+      "Minute": "minute",
+      "Hour": "hour",
+      "Day": "day",
+      "Round": "round",
+      "Turn": "turn"
+    };
+    return units[unit] || "inst";
+  }
+
+  _getRangeUnit(origin) {
+    if (origin === "Self") return "self";
+    if (origin === "Touch") return "touch";
+    return "ft";
+  }
+
+  _getAreaOfEffect(aoeType) {
+    const types = {
+      1: "sphere",
+      2: "cube",
+      3: "cone",
+      4: "line",
+      5: "cylinder"
+    };
+    return types[aoeType] || "";
+  }
+
+  _getActivationType(activation) {
+    if (!activation) return "";
+    const type = activation.activationType;
+    if (type === 1) return "action";
+    if (type === 2) return "bonus";
+    if (type === 3) return "reaction";
+    if (type === 4) return "minute";
+    if (type === 6) return "hour";
+    return "";
+  }
+
+  _getFeatureUses(limitedUse) {
+    if (!limitedUse) return { value: null, max: null, per: null };
+    
+    const perMap = {
+      1: "sr", // Short rest
+      2: "lr", // Long rest
+      3: "day"
+    };
+    
+    return {
+      value: limitedUse.maxUses || null,
+      max: limitedUse.maxUses || null,
+      per: perMap[limitedUse.resetType] || null
     };
   }
 
