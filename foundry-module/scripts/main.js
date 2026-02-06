@@ -147,6 +147,23 @@ class DDBImporterDialog extends FormApplication {
     
     // Now update actor data with calculated values
     const actorData = this._convertDDBToFoundry(ddbData);
+    
+    // Add character portrait
+    if (ddbData.data.decorations?.avatarUrl) {
+      actorData.img = ddbData.data.decorations.avatarUrl;
+    } else if (ddbData.data.avatarUrl) {
+      actorData.img = ddbData.data.avatarUrl;
+    }
+    
+    // Add character token image
+    if (ddbData.data.decorations?.avatarUrl) {
+      actorData.prototypeToken = {
+        texture: {
+          src: ddbData.data.decorations.avatarUrl
+        }
+      };
+    }
+    
     await actor.update({
       ...actorData,
       flags: { ...actor.flags, ...ddbFlags }
@@ -210,19 +227,39 @@ class DDBImporterDialog extends FormApplication {
     const race = ddbData.race;
     if (!race || !race.fullName) return;
 
+    // Check if race already exists on actor
+    const existingRace = actor.items.find(i => i.type === "race");
+    if (existingRace) {
+      console.log("Race already exists, skipping");
+      return;
+    }
+
     // Try to find race in compendium
     const compendiumRace = await this._findInCompendium(race.baseRaceName || race.fullName, "race");
     
-    const raceData = compendiumRace ? compendiumRace.toObject() : {
-      name: race.fullName,
-      type: "race",
-      img: race.portraitAvatarUrl || "icons/svg/mystery-man.svg",
-      system: {
-        description: {
-          value: race.description || ""
+    let raceData;
+    if (compendiumRace) {
+      raceData = compendiumRace.toObject();
+    } else {
+      raceData = {
+        name: race.fullName,
+        type: "race",
+        img: race.portraitAvatarUrl || "icons/svg/mystery-man.svg",
+        system: {
+          description: {
+            value: race.description || ""
+          },
+          source: {
+            custom: "D&D Beyond Import"
+          },
+          advancement: [],
+          identifier: race.baseRaceName?.toLowerCase().replace(/\s+/g, '-') || ""
         }
-      }
-    };
+      };
+      
+      // Save to custom compendium
+      await this._saveToCustomCompendium(raceData);
+    }
 
     await actor.createEmbeddedDocuments("Item", [raceData]);
     ui.notifications.info(`Imported race: ${race.fullName}`);
@@ -500,6 +537,11 @@ class DDBImporterDialog extends FormApplication {
           };
         }
 
+        // Add Active Effects from granted modifiers
+        if (item.grantedModifiers && item.grantedModifiers.length > 0) {
+          itemData.effects = this._createActiveEffects(item.grantedModifiers, item.definition.name);
+        }
+
         // Save to custom compendium for future use
         await this._saveToCustomCompendium(itemData);
         
@@ -625,6 +667,11 @@ class DDBImporterDialog extends FormApplication {
             }
           };
           
+          // Add Active Effects from granted modifiers
+          if (feature.definition.grantedModifiers && feature.definition.grantedModifiers.length > 0) {
+            featureData.effects = this._createActiveEffects(feature.definition.grantedModifiers, feature.definition.name);
+          }
+          
           // Save to custom compendium
           await this._saveToCustomCompendium(featureData);
           features.push(featureData);
@@ -656,6 +703,11 @@ class DDBImporterDialog extends FormApplication {
             }
           }
         };
+        
+        // Add Active Effects from racial traits
+        if (trait.definition.grantedModifiers && trait.definition.grantedModifiers.length > 0) {
+          traitData.effects = this._createActiveEffects(trait.definition.grantedModifiers, trait.definition.name);
+        }
         
         // Save to custom compendium
         await this._saveToCustomCompendium(traitData);
@@ -926,6 +978,102 @@ class DDBImporterDialog extends FormApplication {
       value: limitedUse.maxUses || null,
       max: limitedUse.maxUses || null,
       per: perMap[limitedUse.resetType] || null
+    };
+  }
+  
+  _createActiveEffects(modifiers, itemName) {
+    const effects = [];
+    const changes = [];
+    
+    for (const modifier of modifiers) {
+      const change = this._convertModifierToChange(modifier);
+      if (change) {
+        changes.push(change);
+      }
+    }
+    
+    if (changes.length === 0) return [];
+    
+    // Create a single effect with all changes
+    effects.push({
+      name: `${itemName} - Bonuses`,
+      icon: "icons/svg/aura.svg",
+      origin: null,
+      disabled: false,
+      transfer: true,
+      changes: changes
+    });
+    
+    return effects;
+  }
+  
+  _convertModifierToChange(modifier) {
+    // Map D&D Beyond modifier types to Foundry attribute paths
+    const typeMap = {
+      // Ability scores
+      "bonus": {
+        "strength-score": "system.abilities.str.value",
+        "dexterity-score": "system.abilities.dex.value",
+        "constitution-score": "system.abilities.con.value",
+        "intelligence-score": "system.abilities.int.value",
+        "wisdom-score": "system.abilities.wis.value",
+        "charisma-score": "system.abilities.cha.value",
+        
+        // Skills
+        "acrobatics": "system.skills.acr.bonus",
+        "animal-handling": "system.skills.ani.bonus",
+        "arcana": "system.skills.arc.bonus",
+        "athletics": "system.skills.ath.bonus",
+        "deception": "system.skills.dec.bonus",
+        "history": "system.skills.his.bonus",
+        "insight": "system.skills.ins.bonus",
+        "intimidation": "system.skills.itm.bonus",
+        "investigation": "system.skills.inv.bonus",
+        "medicine": "system.skills.med.bonus",
+        "nature": "system.skills.nat.bonus",
+        "perception": "system.skills.prc.bonus",
+        "performance": "system.skills.prf.bonus",
+        "persuasion": "system.skills.per.bonus",
+        "religion": "system.skills.rel.bonus",
+        "sleight-of-hand": "system.skills.slt.bonus",
+        "stealth": "system.skills.ste.bonus",
+        "survival": "system.skills.sur.bonus",
+        
+        // Other
+        "armor-class": "system.attributes.ac.bonus",
+        "initiative": "system.attributes.init.bonus",
+        "speed": "system.attributes.movement.walk",
+        "hit-points-per-level": "system.attributes.hp.bonuses.level",
+        "proficiency-bonus": "system.attributes.prof"
+      },
+      "set": {
+        "innate-speed-walking": "system.attributes.movement.walk",
+        "innate-speed-flying": "system.attributes.movement.fly",
+        "innate-speed-swimming": "system.attributes.movement.swim",
+        "innate-speed-climbing": "system.attributes.movement.climb"
+      }
+    };
+    
+    const modifierType = modifier.type?.toLowerCase() || "bonus";
+    const subType = modifier.subType?.toLowerCase().replace(/\s+/g, '-') || 
+                    modifier.friendlySubtypeName?.toLowerCase().replace(/\s+/g, '-');
+    
+    if (!subType) return null;
+    
+    const attributePath = typeMap[modifierType]?.[subType];
+    if (!attributePath) {
+      console.log(`Unknown modifier: ${modifierType} - ${subType}`);
+      return null;
+    }
+    
+    const value = modifier.value || modifier.fixedValue || 0;
+    if (value === 0) return null;
+    
+    return {
+      key: attributePath,
+      mode: modifierType === "set" ? 5 : 2, // 5 = OVERRIDE, 2 = ADD
+      value: value,
+      priority: 20
     };
   }
 
