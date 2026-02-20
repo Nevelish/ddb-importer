@@ -72,20 +72,20 @@ document.getElementById('copy-character-btn').addEventListener('click', () => {
   browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs[0];
     const characterId = getCharacterIdFromTab(tab);
-    
+
     if (!characterId) {
       showStatus('❌ Not on a character page', 'error');
       return;
     }
-    
+
     showStatus('⏳ Fetching character data...', 'info');
-    
+
     browserAPI.runtime.sendMessage({ action: "getCobaltCookie" }, (cookieResponse) => {
       if (!cookieResponse.success) {
         showStatus(`✗ ${cookieResponse.error}`, 'error');
         return;
       }
-      
+
       browserAPI.runtime.sendMessage({
         action: "fetchCharacterData",
         characterId: characterId,

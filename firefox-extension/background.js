@@ -20,7 +20,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   if (message.action === "fetchCharacterData") {
     const { characterId, cobaltCookie } = message;
-    
+
     fetch(`https://character-service.dndbeyond.com/character/v5/character/${characterId}`, {
       headers: {
         'Cookie': `CobaltSession=${cobaltCookie}`
@@ -33,7 +33,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch(error => {
       sendResponse({ success: false, error: error.message });
     });
-    
+
     return true; // Will respond asynchronously
   }
 });
