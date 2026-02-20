@@ -95,15 +95,13 @@ class DDBImporterDialog extends FormApplication {
         return;
       }
 
-      // Import compendium data first if available and checkbox is checked
-      if (importCompendium && importData.compendiumData) {
-        ui.notifications.info("Importing compendium data...");
-        await this._importCompendiumItems(importData.compendiumData.items);
-        await this._importCompendiumClasses(importData.compendiumData.classes);
-      } else if (importCompendium && !importData.compendiumData) {
-        ui.notifications.warn(
-          "No compendium data found. Enable 'Include Compendium Data' in the browser extension and re-copy."
-        );
+      // Extract and import compendium data from character data if checkbox is checked
+      if (importCompendium) {
+        const charData = importData.characterData.data || importData.characterData;
+        ui.notifications.info("Importing compendium data from character...");
+        await this._importCompendiumItems(charData.inventory || []);
+        await this._importCompendiumClasses(charData.classes || []);
+        await this._importCompendiumSpells(charData.classSpells || []);
       }
 
       ui.notifications.info("Importing character...");
@@ -1013,6 +1011,79 @@ class DDBImporterDialog extends FormApplication {
     if (imported > 0 || skipped > 0) {
       ui.notifications.info(
         `Compendium classes: ${imported} imported, ${skipped} already existed`
+      );
+    }
+  }
+
+  async _importCompendiumSpells(classSpells) {
+    if (!Array.isArray(classSpells) || classSpells.length === 0) {
+      console.log("DDB Importer | No compendium spells to import");
+      return;
+    }
+
+    let imported = 0;
+    let skipped = 0;
+
+    for (const spellList of classSpells) {
+      for (const spell of spellList.spells || []) {
+        const def = spell.definition;
+        if (!def || !def.name) continue;
+
+        const existing = await this._findInCompendium(def.name, "spell");
+        if (existing) {
+          skipped++;
+          continue;
+        }
+
+        const spellData = {
+          name: def.name,
+          type: "spell",
+          img: "icons/svg/book.svg",
+          system: {
+            description: {
+              value: def.description || ""
+            },
+            level: def.level || 0,
+            school: this._getSpellSchool(def.school),
+            components: {
+              vocal: def.components?.includes(1) || false,
+              somatic: def.components?.includes(2) || false,
+              material: def.components?.includes(3) || false,
+              ritual: def.ritual || false,
+              concentration: def.concentration || false
+            },
+            materials: {
+              value: def.componentsDescription || ""
+            },
+            actionType: this._getSpellActionType(def),
+            damage: this._getSpellDamage(def),
+            save: this._getSpellSave(def),
+            duration: {
+              value: def.duration?.durationInterval || null,
+              units: this._getDurationUnit(def.duration?.durationUnit)
+            },
+            range: {
+              value: def.range?.rangeValue || null,
+              units: this._getRangeUnit(def.range?.origin)
+            },
+            target: {
+              value: def.range?.aoeValue || null,
+              type: this._getAreaOfEffect(def.range?.aoeType)
+            },
+            source: {
+              custom: "D&D Beyond Compendium"
+            }
+          }
+        };
+
+        await this._saveToCustomCompendium(spellData);
+        imported++;
+      }
+    }
+
+    if (imported > 0 || skipped > 0) {
+      ui.notifications.info(
+        `Compendium spells: ${imported} imported, ${skipped} already existed`
       );
     }
   }

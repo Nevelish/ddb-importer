@@ -17,17 +17,17 @@
       "noData": "Please paste character data from D&D Beyond extension",
       "invalidFormat": "Invalid data format. Please use 'Copy Character Data' from the extension.",
       "importing": "Importing character...",
-      "importingCompendium": "Importing compendium data...",
-      "compendiumNoData": "No compendium data found. Enable 'Include Compendium Data' in the browser extension and re-copy.",
+      "importingCompendium": "Importing compendium data from character...",
       "compendiumItems": "Compendium items: {imported} imported, {skipped} already existed",
       "compendiumClasses": "Compendium classes: {imported} imported, {skipped} already existed",
+      "compendiumSpells": "Compendium spells: {imported} imported, {skipped} already existed",
       "success": "Character \"{name}\" imported successfully!",
       "updated": "Updated existing character: {name}",
       "failed": "Import failed: {error}"
     },
     "compendium": {
-      "importLabel": "Import D&D Beyond compendium data (items & classes) into world compendium",
-      "importHint": "When checked, compendium items and classes from the pasted data will be saved for reuse across characters."
+      "importLabel": "Save items, classes & spells to world compendium",
+      "importHint": "Extracts item, class, and spell definitions from the character data and saves them to the world compendium for reuse across characters."
     }
   }
 }

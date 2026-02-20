@@ -78,10 +78,7 @@ document.getElementById('copy-character-btn').addEventListener('click', () => {
       return;
     }
 
-    const includeCompendium = document.getElementById('include-compendium').checked;
-    showStatus(includeCompendium
-      ? '⏳ Fetching character & compendium data...'
-      : '⏳ Fetching character data...', 'info');
+    showStatus('⏳ Fetching character data...', 'info');
 
     browserAPI.runtime.sendMessage({ action: "getCobaltCookie" }, (cookieResponse) => {
       if (!cookieResponse.success) {
@@ -94,47 +91,19 @@ document.getElementById('copy-character-btn').addEventListener('click', () => {
         characterId: characterId,
         cobaltCookie: cookieResponse.cookie
       }, (dataResponse) => {
-        if (!dataResponse.success) {
-          showStatus(`✗ ${dataResponse.error}`, 'error');
-          return;
-        }
-
-        const exportData = {
-          cobaltCookie: cookieResponse.cookie,
-          characterUrl: tab.url,
-          characterId: characterId,
-          characterData: dataResponse.data,
-          timestamp: new Date().toISOString()
-        };
-
-        if (!includeCompendium) {
+        if (dataResponse.success) {
+          const exportData = {
+            cobaltCookie: cookieResponse.cookie,
+            characterUrl: tab.url,
+            characterId: characterId,
+            characterData: dataResponse.data,
+            timestamp: new Date().toISOString()
+          };
           copyToClipboard(JSON.stringify(exportData, null, 2));
           showStatus('✓ Character data copied!', 'success');
-          return;
+        } else {
+          showStatus(`✗ ${dataResponse.error}`, 'error');
         }
-
-        // Also fetch compendium data
-        browserAPI.runtime.sendMessage({
-          action: "fetchCompendiumData",
-          cobaltCookie: cookieResponse.cookie
-        }, (compendiumResponse) => {
-          if (compendiumResponse.success) {
-            exportData.compendiumData = compendiumResponse.data;
-            copyToClipboard(JSON.stringify(exportData, null, 2));
-            const itemCount = Array.isArray(exportData.compendiumData.items)
-              ? exportData.compendiumData.items.length : 0;
-            const classCount = Array.isArray(exportData.compendiumData.classes)
-              ? exportData.compendiumData.classes.length : 0;
-            showStatus(
-              `✓ Copied! (${itemCount} items, ${classCount} classes)`,
-              'success'
-            );
-          } else {
-            // Still copy character data even if compendium fetch fails
-            copyToClipboard(JSON.stringify(exportData, null, 2));
-            showStatus('✓ Character copied (compendium fetch failed)', 'success');
-          }
-        });
       });
     });
   });
